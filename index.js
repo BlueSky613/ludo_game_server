@@ -56,8 +56,8 @@ app.set('port', process.env.PORT || 2980);
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 'bentan010918@gmail.com',
-        pass: 'vhkmsyyyyafbzajc'
+        user: process.env.GMAIL,
+        pass: process.env.GMAIL_PASSWORD
     }
 });
 
@@ -65,7 +65,7 @@ app.post('/send-otp', (req, res) => {
     const { email } = req.body;
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const mailOptions = {
-        from: '"Meet Astro Team" <bentan010918@gmail.com>',
+        from: `"Meet Astro Team" <${process.env.GMAIL}>`,
         to: email,
         subject: 'OTP for Ludo Sign in',
         text: otp,
