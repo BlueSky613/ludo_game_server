@@ -17,15 +17,33 @@ var unirest = require("unirest");
 var nodemailer = require('nodemailer');
 const path = require("path");
 const payu = require("pay-u").newOrder
+dotenv.config();
 
 
 const mysql = require('mysql');
 const pool = mysql.createPool({
-    host: '68.178.225.178',
-    user: 'ludo_user',
-    password: 'ludo_user',
-    database: 'ludo_db',
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    port: process.env.DB_PORT,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_DATABASE,
 });
+
+function checkConnection() {
+    pool.getConnection((err, connection) => {
+        if (err) {
+            console.error('Error connecting to the database:', err.stack);
+            return;
+        }
+
+        console.log('Connected to the database with thread ID:', connection.threadId);
+
+        // Release the connection back to the pool
+        connection.release();
+    });
+}
+
+checkConnection();
 
 var currVersion = 12;
 var apkUrl = "https://drive.google.com/file/d/1ob_RRmavRtuoSyDfLpUQT5Dz7Rnoz5rv/view?usp=sharing";
@@ -39,8 +57,6 @@ const instance = new Razorpay({
     key_secret: razorpay_key_secret,
 });
 
-
-dotenv.config();
 app.use(cors());
 app.use(express.json());
 app.set("view engine", "ejs");
@@ -61,27 +77,69 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-app.post('/send-otp', (req, res) => {
-    const { email } = req.body;
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const mailOptions = {
-        from: `"Meet Astro Team" <${process.env.GMAIL}>`,
-        to: email,
-        subject: 'OTP for Ludo Sign in',
-        text: otp,
-        html: `<h3>Hello ${email},</h3>
+app.post('/register', (req, res) => {
+    const { name, email, password } = req.body;
+    pool.query('SELECT * FROM user WHERE email = ? OR name = ?', [email, name], (err, result) => {
+        if (err) {
+            console.log(err);
+            res.status(500).send('Error registering user');
+        } else if (result.length > 0) {
+            res.status(201).send('User already exists');
+        } else {
+            bcrypt.hash(password, 10, (err, hash) => {
+                if (err) {
+                    console.log(err);
+                    res.status(500).send('Error registering user');
+                } else {
+                    pool.query('INSERT INTO user (name, email, password) VALUES (?, ?, ?)', [name, email, hash], (err) => {
+                        if (err) {
+                            console.log(err);
+                            res.status(500).send('Error registering user');
+                        } else {
+                            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+                            const mailOptions = {
+                                from: `"Meet Astro Team" <${process.env.GMAIL}>`,
+                                to: email,
+                                subject: 'OTP for Ludo Sign in',
+                                text: otp,
+                                html: `<h3>Hello ${email},</h3>
             <p>You got a new code from Scope Inc:</p>
             <h1 style="padding: 12px; border-left: 4px solid #d0d0d0; font-style: italic;">${otp}</h1>
             <p>Best wishes,<br>Scope Inc.</p>`,
-    };
+                            };
+                            console.log(otp);
+                            transporter.sendMail(mailOptions, (error, info) => {
+                                if (error) {
+                                    console.log(error);
+                                    res.status(500).send('Error sending OTP');
+                                } else {
+                                    console.log('Email sent: ' + info.response);
+                                    res.status(200).send(otp);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        }
+    });
+})
 
-    transporter.sendMail(mailOptions, (error, info) => {
-        if (error) {
-            console.log(error);
-            res.status(500).send('Error sending OTP');
+app.post('/login', (req, res) => {
+    const { email, password } = req.body;
+    pool.query('SELECT * FROM user WHERE email = ?', [email], (err, result) => {
+        if (err) {
+            console.log(err);
+            res.status(500).send('Error registering user');
+        } else if (result.length > 0) {
+            if (bcrypt.compare(password, result[0].password)) {
+            // if (password == result[0].password) {
+                res.status(200).send({name: result[0].name, message:'User signed in'});
+            } else {
+                res.status(200).send({message:'Password is incorrect'});
+            };
         } else {
-            console.log('Email sent: ' + info.response);
-            res.status(200).send(otp);
+            res.status(200).send({message:'User not found'});
         }
     });
 })
@@ -1915,12 +1973,12 @@ io.on('connection', function (socket) {
 function RegisterMySql(data, lSocket) {
     var email = data.email;
     var sql = 'SELECT * FROM users WHERE email = ?';
-   
+
     pool.query(sql, [email], function (error, result, fields) {
         var isAvailableChe = false;
         var alreadyRegisterChe = false;
         if (!error) {
-           
+
             if (result.length != 0) {
                 if (result[0].email == email) {
                     isAvailableChe = true;
@@ -1934,7 +1992,7 @@ function RegisterMySql(data, lSocket) {
             }
             if (!isAvailableChe && !alreadyRegisterChe) {
                 lSocket.emit("RegisterAvailable", {});
-               
+
             } else if (alreadyRegisterChe) {
                 //lSocket.emit("DifferentDeviceId", {});
                 VerifyUserMongoDB(data, lSocket, "old");
@@ -1951,7 +2009,7 @@ function RegisterMySql(data, lSocket) {
 }
 function RegisterAvailable(data, lSocket) {
     RegisterReferralCode(data, lSocket);
-   // RegisterMySql2(data, lSocket);
+    // RegisterMySql2(data, lSocket);
 }
 function RegisterReferralCode(data, lSocket) {
     var referral_code = data.name.substring(0, 5) + referralCodeGenerator.alphaNumeric('uppercase', 3, 1);
@@ -1963,7 +2021,7 @@ function RegisterReferralCode(data, lSocket) {
                 isAvailableChe = true;
             }
         }
-        if (!isAvailableChe) { 
+        if (!isAvailableChe) {
             //checkDeviceID(data, lSocket, referral_code);
             RegisterMySql2(data, lSocket, referral_code);
         } else {
@@ -1989,7 +2047,7 @@ function checkDeviceID(data, lSocket, referral_code) {
 }
 function RegisterMySql2(data, lSocket, referral_code) {
 
-   
+
     var today = new Date();
     data.created_at = today;
     data.updated_at = today;
@@ -2009,7 +2067,7 @@ function RegisterMySql2(data, lSocket, referral_code) {
         deviceinfo: data.deviceID,
         status: data.status,
         referral_code: data.referral_code
-       
+
     };
     pool.query('INSERT INTO users SET ?', post, function (error, result, fields) {
         if (error) {
@@ -2080,7 +2138,7 @@ function WithdrawMongoDB3(lSocket, data, cash) {
         sender: data.email,
         method: data.wtype,
         mocions: data.withdrawAmt,
-        confirm:0
+        confirm: 0
     };
     pool.query('INSERT INTO payments SET ?', post, function (error, result, fields) {
         if (error) {
@@ -2088,7 +2146,7 @@ function WithdrawMongoDB3(lSocket, data, cash) {
             lSocket.emit("Withdraw", { status: "failed" });
         } else {
             lSocket.emit("Withdraw", { status: "success", cash: cash });
-           
+
         }
     });
 }
@@ -2121,7 +2179,7 @@ function VerifyCash(email, lSocket) {
     var sql = 'SELECT * FROM users WHERE email = ?';
     pool.query(sql, [email], function (error, result, fields) {
         if (result.length != 0) {
-            var chValue = parseFloat(result[0].cash, 10); 
+            var chValue = parseFloat(result[0].cash, 10);
             //console.log("cash " + result[0].email + " " + chValue);
             Updated_Cash(email, chValue, lSocket);
         }
@@ -2280,7 +2338,7 @@ function GetReferFunc5(refer_email, rAmount) {
         method: "Refer Bonus",
         commission: 0,
         game_name: "Ludo Real",
-        
+
     };
     pool.query('INSERT INTO payment_methods SET ?', post, function (error, result, fields) {
         if (!error) {
@@ -2317,14 +2375,14 @@ function SignUpBonus2(email) {
     });
 }
 
-function InsertDeposit(data, lSocket)  {
+function InsertDeposit(data, lSocket) {
     var sql = 'SELECT * FROM settings';
     pool.query(sql, function (error, result, fields) {
         if (result.length != 0)
-        InsertDeposit2(data, lSocket, parseInt(result[0].withName));
+            InsertDeposit2(data, lSocket, parseInt(result[0].withName));
     });
 }
-function InsertDeposit2(data, lSocket,dAmount) {
+function InsertDeposit2(data, lSocket, dAmount) {
     var today = new Date();
     data.created_at = today;
     data.updated_at = today;
@@ -2343,7 +2401,7 @@ function InsertDeposit2(data, lSocket,dAmount) {
         method: data.method,
         commission: data.commission,
         game_name: data.game_name,
-        
+
     };
     pool.query('INSERT INTO payment_methods SET ?', post, function (error, result, fields) {
         if (!error) {
@@ -2494,7 +2552,7 @@ function razorPayDeposit(email, amount) {
         method: data.method,
         commission: data.commission,
         game_name: data.game_name,
-       
+
     };
     pool.query('INSERT INTO payment_methods SET ?', post, function (error, result, fields) {
         console.log("not done " + error);
@@ -2526,7 +2584,7 @@ function winningDeposit(email, amount) {
         method: data.method,
         commission: data.commission,
         game_name: data.game_name,
-      
+
     };
     pool.query('INSERT INTO payment_methods SET ?', post, function (error, result, fields) {
         console.log("not done " + error);
